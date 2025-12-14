@@ -1,72 +1,450 @@
-import tkinter as tk
-from tkinter import messagebox, filedialog
-from auth import init_config, verify_password
-from locker import (
-    add_folder, remove_folder,
-    lock_all, unlock_all,
-    get_folders
-)
+import sys
+import os
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+                             QLabel, QLineEdit, QPushButton, QStackedWidget, 
+                             QFrame, QMessageBox, QHBoxLayout, QSpacerItem, 
+                             QSizePolicy, QListWidget, QListWidgetItem, QFileDialog, QDialog)
+from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtGui import QIcon, QAction
 
-# ===== INIT CONFIG =====
-init_config()
+# Import modul buatan kita
+from database import DatabaseManager
+from core import SystemLogic
+from styles import APP_STYLE
 
-# ===== GUI =====
-root = tk.Tk()
-root.title("Folder Lock App")
-root.geometry("450x350")
+# --- CLASS BASE & LOGIN (Dari tahap sebelumnya) ---
 
-# ===== LOGIN =====
-login_frame = tk.Frame(root)
-login_frame.pack(pady=60)
+class BasePage(QWidget):
+    """Template dasar agar setiap halaman punya layout Card ditengah"""
+    def __init__(self):
+        super().__init__()
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Spacer atas
+        self.main_layout.addItem(QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
+        
+        # Container Card (Kotak Putih)
+        self.card_frame = QFrame()
+        self.card_frame.setObjectName("Card")
+        self.card_frame.setFixedWidth(420)
+        
+        # Layout di dalam Card
+        self.card_layout = QVBoxLayout(self.card_frame)
+        self.card_layout.setContentsMargins(40, 40, 40, 40)
+        self.card_layout.setSpacing(20)
+        
+        # Menambahkan Card ke layout utama
+        self.main_layout.addWidget(self.card_frame, 0, Qt.AlignmentFlag.AlignCenter)
+        
+        # Spacer bawah
+        self.main_layout.addItem(QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
 
-tk.Label(login_frame, text="Masukkan Password").pack()
-password_entry = tk.Entry(login_frame, show="*", width=30)
-password_entry.pack(pady=5)
+        # Footer
+        version_label = QLabel("v1.0.4 © 2025 Kelompok 10")
+        version_label.setObjectName("Footer")
+        version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.main_layout.addWidget(version_label)
+        self.main_layout.addSpacing(20)
 
-def login():
-    if verify_password(password_entry.get()):
-        login_frame.pack_forget()
-        dashboard.pack()
-        refresh_list()
-    else:
-        messagebox.showerror("Error", "Password salah!")
+class SetPasswordPage(BasePage):
+    def __init__(self, navigator, db):
+        super().__init__()
+        self.navigator = navigator
+        self.db = db
+        
+        icon_label = QLabel("🔐") 
+        icon_label.setObjectName("IconHeader")
+        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-tk.Button(login_frame, text="Login", command=login).pack(pady=10)
+        title = QLabel("Set Master Password")
+        title.setObjectName("Title")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        subtitle = QLabel("Create a secure password to protect your files.")
+        subtitle.setObjectName("Subtitle")
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        subtitle.setWordWrap(True)
 
-# ===== DASHBOARD =====
-dashboard = tk.Frame(root)
+        lbl_pwd = QLabel("Password")
+        self.input_pwd = QLineEdit()
+        self.input_pwd.setPlaceholderText("Enter new password")
+        self.input_pwd.setEchoMode(QLineEdit.EchoMode.Password)
+        
+        lbl_confirm = QLabel("Confirm Password")
+        self.input_confirm = QLineEdit()
+        self.input_confirm.setPlaceholderText("Re-enter password")
+        self.input_confirm.setEchoMode(QLineEdit.EchoMode.Password)
+        
+        btn_set = QPushButton("Set Password")
+        btn_set.setObjectName("PrimaryButton")
+        btn_set.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_set.clicked.connect(self.handle_set_password)
+        
+        info_note = QLabel("Make sure your password is memorable. If you forget this password, your locked folders cannot be recovered.")
+        info_note.setObjectName("InfoNote")
+        info_note.setWordWrap(True)
 
-listbox = tk.Listbox(dashboard, width=60)
-listbox.pack(pady=10)
+        self.card_layout.addWidget(icon_label)
+        self.card_layout.addWidget(title)
+        self.card_layout.addWidget(subtitle)
+        self.card_layout.addSpacing(10)
+        self.card_layout.addWidget(lbl_pwd)
+        self.card_layout.addWidget(self.input_pwd)
+        self.card_layout.addWidget(lbl_confirm)
+        self.card_layout.addWidget(self.input_confirm)
+        self.card_layout.addWidget(btn_set)
+        self.card_layout.addSpacing(10)
+        self.card_layout.addWidget(info_note)
 
-def refresh_list():
-    listbox.delete(0, tk.END)
-    for folder in get_folders():
-        listbox.insert(tk.END, folder)
+    def handle_set_password(self):
+        pwd = self.input_pwd.text()
+        confirm = self.input_confirm.text()
+        
+        if not pwd or not confirm:
+            QMessageBox.warning(self, "Error", "Password cannot be empty!")
+            return
+        if pwd != confirm:
+            QMessageBox.warning(self, "Error", "Passwords do not match!")
+            return
+            
+        hashed = SystemLogic.hash_password(pwd)
+        self.db.set_master_password(hashed.decode('utf-8'))
+        
+        QMessageBox.information(self, "Success", "Password set successfully!")
+        self.navigator.setCurrentIndex(1) 
 
-def choose_folder():
-    folder = filedialog.askdirectory()
-    if folder:
-        add_folder(folder)
-        refresh_list()
+class LoginPage(BasePage):
+    def __init__(self, navigator, db):
+        super().__init__()
+        self.navigator = navigator
+        self.db = db
+        
+        icon_label = QLabel("🔒")
+        icon_label.setObjectName("IconHeader")
+        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-def delete_folder():
-    selected = listbox.curselection()
-    if selected:
-        remove_folder(listbox.get(selected[0]))
-        refresh_list()
+        title = QLabel("Secure Vault")
+        title.setObjectName("Title")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        subtitle = QLabel("Enter your password to access files")
+        subtitle.setObjectName("Subtitle")
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        lbl_pwd = QLabel("Password")
+        self.input_pwd = QLineEdit()
+        self.input_pwd.setPlaceholderText("Enter password")
+        self.input_pwd.setEchoMode(QLineEdit.EchoMode.Password)
+        
+        btn_login = QPushButton("Login")
+        btn_login.setObjectName("PrimaryButton")
+        btn_login.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_login.clicked.connect(self.handle_login)
+        
+        # links_layout = QHBoxLayout()
+        # chk_remember = QLabel("Remember me") 
+        # btn_forgot = QPushButton("Forgot password?")
+        # btn_forgot.setObjectName("LinkButton")
+        # btn_forgot.setCursor(Qt.CursorShape.PointingHandCursor)
+        
+        # links_layout.addWidget(chk_remember)
+        # links_layout.addStretch()
+        # links_layout.addWidget(btn_forgot)
 
-tk.Button(dashboard, text="Tambah Folder", command=choose_folder).pack(pady=3)
-tk.Button(dashboard, text="Hapus Folder", command=delete_folder).pack(pady=3)
-tk.Button(dashboard, text="Lock Semua Folder", command=lock_all).pack(pady=3)
-tk.Button(dashboard, text="Unlock Semua Folder", command=unlock_all).pack(pady=3)
+        self.card_layout.addWidget(icon_label)
+        self.card_layout.addWidget(title)
+        self.card_layout.addWidget(subtitle)
+        self.card_layout.addSpacing(10)
+        self.card_layout.addWidget(lbl_pwd)
+        self.card_layout.addWidget(self.input_pwd)
+        # self.card_layout.addLayout(links_layout)
+        self.card_layout.addWidget(btn_login)
 
-# ===== AUTO LOCK ON CLOSE =====
-def on_close():
-    lock_all()
-    root.destroy()
+    def handle_login(self):
+        pwd = self.input_pwd.text()
+        stored_hash = self.db.get_master_password()
+        
+        if SystemLogic.check_password(pwd, stored_hash):
+            self.navigator.setCurrentIndex(2) # Pindah ke Dashboard
+            self.navigator.currentWidget().refresh_list()
+        else:
+            QMessageBox.critical(self, "Error", "Invalid Password!")
 
-root.protocol("WM_DELETE_WINDOW", on_close)
+# --- DASHBOARD & DIALOGS ---
 
-root.mainloop()
+class FolderItemWidget(QWidget):
+    """Widget custom untuk tampilan baris folder"""
+    def __init__(self, name, date):
+        super().__init__()
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        
+        icon_lbl = QLabel("📁") 
+        icon_lbl.setStyleSheet("font-size: 24px; color: #F59E0B;") 
+        
+        info_layout = QVBoxLayout()
+        name_lbl = QLabel(name)
+        name_lbl.setObjectName("FolderName")
+        date_lbl = QLabel(f"Locked on {date}")
+        date_lbl.setObjectName("FolderDate")
+        info_layout.addWidget(name_lbl)
+        info_layout.addWidget(date_lbl)
+        
+        arrow_lbl = QLabel("›")
+        arrow_lbl.setStyleSheet("font-size: 20px; color: #9CA3AF; font-weight: bold;")
+        
+        layout.addWidget(icon_lbl)
+        layout.addSpacing(10)
+        layout.addLayout(info_layout)
+        layout.addStretch()
+        layout.addWidget(arrow_lbl)
 
+class LockDialog(QDialog):
+    """Dialog Halaman 4: Lock"""
+    def __init__(self, parent, folder_path):
+        super().__init__(parent)
+        self.folder_path = folder_path
+        self.setWindowTitle("Lock Folder")
+        self.setFixedSize(400, 480)
+        self.setStyleSheet(APP_STYLE)
+        
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        layout.setContentsMargins(30, 30, 30, 30)
+        
+        header = QLabel("🔒 Lock Folder")
+        header.setObjectName("Title")
+        header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(header)
+        
+        path_frame = QFrame()
+        path_frame.setStyleSheet("background-color: #F3F4F6; border-radius: 8px; padding: 10px;")
+        path_layout = QVBoxLayout(path_frame)
+        
+        lbl_path_title = QLabel("Selected Folder:")
+        lbl_path_title.setStyleSheet("font-size: 11px; color: #6B7280;")
+        lbl_path_val = QLabel(os.path.basename(folder_path))
+        lbl_path_val.setStyleSheet("font-weight: bold; color: #4F46E5;")
+        lbl_full_path = QLabel(folder_path)
+        lbl_full_path.setStyleSheet("font-size: 10px; color: gray;")
+        lbl_full_path.setWordWrap(True)
+
+        path_layout.addWidget(lbl_path_title)
+        path_layout.addWidget(lbl_path_val)
+        path_layout.addWidget(lbl_full_path)
+        layout.addWidget(path_frame)
+        
+        self.input_pwd = QLineEdit()
+        self.input_pwd.setPlaceholderText("Create folder password")
+        self.input_pwd.setEchoMode(QLineEdit.EchoMode.Password)
+        
+        self.input_confirm = QLineEdit()
+        self.input_confirm.setPlaceholderText("Confirm folder password")
+        self.input_confirm.setEchoMode(QLineEdit.EchoMode.Password)
+        
+        layout.addWidget(QLabel("Password"))
+        layout.addWidget(self.input_pwd)
+        layout.addWidget(QLabel("Confirm Password"))
+        layout.addWidget(self.input_confirm)
+        
+        btn_lock = QPushButton("🔒 Kunci (Lock)")
+        btn_lock.setObjectName("PrimaryButton")
+        btn_lock.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_lock.clicked.connect(self.accept_lock)
+        layout.addWidget(btn_lock)
+
+    def accept_lock(self):
+        p1 = self.input_pwd.text()
+        p2 = self.input_confirm.text()
+        if not p1 or not p2:
+            QMessageBox.warning(self, "Error", "Password cannot be empty")
+            return
+        if p1 != p2:
+            QMessageBox.warning(self, "Error", "Passwords do not match")
+            return
+        self.password = p1
+        self.accept()
+
+class UnlockDialog(QDialog):
+    """Dialog Halaman 5: Unlock (New)"""
+    def __init__(self, parent, folder_path):
+        super().__init__(parent)
+        self.folder_path = folder_path
+        self.setWindowTitle("Unlock Folder")
+        self.setFixedSize(400, 400)
+        self.setStyleSheet(APP_STYLE)
+        
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        layout.setContentsMargins(30, 30, 30, 30)
+        
+        header = QLabel("🔓 Unlock Folder")
+        header.setObjectName("Title")
+        header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(header)
+        
+        subtitle = QLabel("Enter password to unlock contents.")
+        subtitle.setObjectName("Subtitle")
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(subtitle)
+
+        # Path Display (Sederhana)
+        path_lbl = QLabel(f"📁 {os.path.basename(folder_path)}")
+        path_lbl.setStyleSheet("background-color: #F3F4F6; padding: 10px; border-radius: 8px; color: #4F46E5; font-weight: bold;")
+        path_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(path_lbl)
+        
+        self.input_pwd = QLineEdit()
+        self.input_pwd.setPlaceholderText("Enter folder password")
+        self.input_pwd.setEchoMode(QLineEdit.EchoMode.Password)
+        
+        layout.addWidget(QLabel("Password"))
+        layout.addWidget(self.input_pwd)
+        
+        btn_unlock = QPushButton("🔓 Buka (Unlock)")
+        btn_unlock.setObjectName("PrimaryButton")
+        btn_unlock.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_unlock.clicked.connect(self.accept_unlock)
+        layout.addWidget(btn_unlock)
+
+    def accept_unlock(self):
+        pwd = self.input_pwd.text()
+        if not pwd:
+            QMessageBox.warning(self, "Error", "Password cannot be empty")
+            return
+        self.password = pwd
+        self.accept()
+
+class DashboardPage(QWidget):
+    def __init__(self, navigator, db):
+        super().__init__()
+        self.navigator = navigator
+        self.db = db
+        
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(40, 40, 40, 40)
+        self.layout.setSpacing(20)
+        
+        header_layout = QHBoxLayout()
+        title = QLabel("🔒 Locked Folders")
+        title.setObjectName("Title")
+        
+        self.badge = QLabel("0 items")
+        self.badge.setStyleSheet("background-color: #E5E7EB; color: #374151; padding: 4px 8px; border-radius: 10px; font-size: 12px;")
+        
+        header_layout.addWidget(title)
+        header_layout.addStretch()
+        header_layout.addWidget(self.badge)
+        
+        self.list_widget = QListWidget()
+        
+        btn_add = QPushButton("+ Add Folder to Lock")
+        btn_add.setObjectName("PrimaryButton")
+        btn_add.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_add.clicked.connect(self.add_folder_flow)
+        
+        btn_unlock = QPushButton("🔓 Unlock Selected Folder")
+        btn_unlock.setObjectName("OutlineButton")
+        btn_unlock.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_unlock.clicked.connect(self.unlock_folder_flow)
+        
+        self.layout.addLayout(header_layout)
+        self.layout.addWidget(self.list_widget)
+        self.layout.addWidget(btn_add)
+        self.layout.addWidget(btn_unlock)
+
+    def refresh_list(self):
+        self.list_widget.clear()
+        folders = self.db.get_all_folders() 
+        self.badge.setText(f"{len(folders)} items")
+        for f_id, f_path, f_name, f_date in folders:
+            item = QListWidgetItem(self.list_widget)
+            item.setSizeHint(QSize(0, 80)) 
+            item.setData(Qt.ItemDataRole.UserRole, f_id) 
+            item.setData(Qt.ItemDataRole.UserRole + 1, f_path)
+            row_widget = FolderItemWidget(f_name, f_date)
+            self.list_widget.setItemWidget(item, row_widget)
+
+    def add_folder_flow(self):
+        folder_path = QFileDialog.getExistingDirectory(self, "Select Folder to Lock")
+        if folder_path:
+            dialog = LockDialog(self, folder_path)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                pwd = dialog.password
+                if SystemLogic.lock_folder(folder_path):
+                    hashed = SystemLogic.hash_password(pwd)
+                    folder_name = os.path.basename(folder_path)
+                    self.db.insert_folder(folder_path, folder_name, hashed.decode('utf-8'))
+                    self.refresh_list()
+                    QMessageBox.information(self, "Success", "Folder has been locked and hidden!")
+                else:
+                    QMessageBox.critical(self, "Error", "Failed to lock folder. Run as Admin!")
+
+    def unlock_folder_flow(self):
+        current_item = self.list_widget.currentItem()
+        if not current_item:
+            QMessageBox.warning(self, "Warning", "Please select a folder to unlock first.")
+            return
+
+        folder_path = current_item.data(Qt.ItemDataRole.UserRole + 1)
+        folder_id = current_item.data(Qt.ItemDataRole.UserRole)
+        
+        # Munculkan Dialog Halaman 5
+        dialog = UnlockDialog(self, folder_path)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            input_pwd = dialog.password
+            
+            # 1. Ambil Hash dari DB
+            stored_hash = self.db.get_folder_password(folder_id)
+            
+            # 2. Validasi Password
+            if stored_hash and SystemLogic.check_password(input_pwd, stored_hash):
+                # 3. Proses Unlock System
+                if SystemLogic.unlock_folder(folder_path):
+                    self.db.delete_folder(folder_id)
+                    self.refresh_list()
+                    QMessageBox.information(self, "Success", "Folder Unlocked successfully!")
+                else:
+                    QMessageBox.critical(self, "Error", "Failed to unlock system permissions.")
+            else:
+                QMessageBox.critical(self, "Error", "Incorrect Password for this folder!")
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("File Locker Pro")
+        self.resize(1000, 750)
+        
+        self.db = DatabaseManager()
+        
+        self.central_widget = QWidget()
+        self.central_widget.setObjectName("CentralWidget")
+        self.setCentralWidget(self.central_widget)
+        
+        self.layout = QVBoxLayout(self.central_widget)
+        self.layout.setContentsMargins(0,0,0,0)
+        
+        self.stack = QStackedWidget()
+        self.layout.addWidget(self.stack)
+        
+        self.page_set_password = SetPasswordPage(self.stack, self.db)
+        self.page_login = LoginPage(self.stack, self.db)
+        self.page_dashboard = DashboardPage(self.stack, self.db)
+        
+        self.stack.addWidget(self.page_set_password)
+        self.stack.addWidget(self.page_login)
+        self.stack.addWidget(self.page_dashboard)
+        
+        if self.db.is_setup_done():
+            self.stack.setCurrentIndex(1)
+        else:
+            self.stack.setCurrentIndex(0)
+
+        self.setStyleSheet(APP_STYLE)
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec())
