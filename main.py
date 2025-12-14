@@ -5,14 +5,59 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QFrame, QMessageBox, QHBoxLayout, QSpacerItem, 
                              QSizePolicy, QListWidget, QListWidgetItem, QFileDialog, QDialog)
 from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QIcon, QAction
-
-# Import modul buatan kita
+from PyQt6.QtGui import QIcon, QAction, QPixmap, QPainter, QFont, QColor
 from database import DatabaseManager
 from core import SystemLogic
 from styles import APP_STYLE
 
-# --- CLASS BASE & LOGIN (Dari tahap sebelumnya) ---
+class PasswordInput(QLineEdit):
+    """
+    Custom QLineEdit dengan tombol 'Mata' menggunakan font ikon bawaan Windows
+    (Segoe MDL2 Assets) agar terlihat standar dan rapi.
+    """
+    def __init__(self, placeholder=""):
+        super().__init__()
+        self.setPlaceholderText(placeholder)
+        self.setEchoMode(QLineEdit.EchoMode.Password)
+        self.icon_show = self.get_icon_from_font("\uE890")
+        self.icon_hide = self.get_icon_from_font("\uED1A")
+        self.toggle_action = self.addAction(self.icon_show, QLineEdit.ActionPosition.TrailingPosition)
+        self.toggle_action.triggered.connect(self.toggle_visibility)
+        self.password_shown = False
+
+    def toggle_visibility(self):
+        if not self.password_shown:
+   
+            self.setEchoMode(QLineEdit.EchoMode.Normal)
+  
+            self.toggle_action.setIcon(self.icon_hide) 
+            self.password_shown = True
+        else:
+
+            self.setEchoMode(QLineEdit.EchoMode.Password)
+
+            self.toggle_action.setIcon(self.icon_show) 
+            self.password_shown = False
+
+    def get_icon_from_font(self, char_code):
+        """Helper untuk merender karakter font menjadi QIcon"""
+        pixmap = QPixmap(32, 32) 
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+ 
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+        
+        font = QFont("Segoe MDL2 Assets", 14)
+        painter.setFont(font)
+        painter.setPen(QColor("#6B7280")) 
+        
+
+        painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, char_code)
+        painter.end()
+        return QIcon(pixmap)
+
+
 
 class BasePage(QWidget):
     """Template dasar agar setiap halaman punya layout Card ditengah"""
@@ -21,26 +66,22 @@ class BasePage(QWidget):
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
         
-        # Spacer atas
         self.main_layout.addItem(QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
         
-        # Container Card (Kotak Putih)
         self.card_frame = QFrame()
         self.card_frame.setObjectName("Card")
         self.card_frame.setFixedWidth(420)
         
-        # Layout di dalam Card
         self.card_layout = QVBoxLayout(self.card_frame)
         self.card_layout.setContentsMargins(40, 40, 40, 40)
         self.card_layout.setSpacing(20)
         
-        # Menambahkan Card ke layout utama
         self.main_layout.addWidget(self.card_frame, 0, Qt.AlignmentFlag.AlignCenter)
         
-        # Spacer bawah
+
         self.main_layout.addItem(QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
 
-        # Footer
+
         version_label = QLabel("v1.0.4 © 2025 Kelompok 10")
         version_label.setObjectName("Footer")
         version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -67,14 +108,11 @@ class SetPasswordPage(BasePage):
         subtitle.setWordWrap(True)
 
         lbl_pwd = QLabel("Password")
-        self.input_pwd = QLineEdit()
-        self.input_pwd.setPlaceholderText("Enter new password")
-        self.input_pwd.setEchoMode(QLineEdit.EchoMode.Password)
+        self.input_pwd = PasswordInput("Enter new password")
         
         lbl_confirm = QLabel("Confirm Password")
-        self.input_confirm = QLineEdit()
-        self.input_confirm.setPlaceholderText("Re-enter password")
-        self.input_confirm.setEchoMode(QLineEdit.EchoMode.Password)
+
+        self.input_confirm = PasswordInput("Re-enter password")
         
         btn_set = QPushButton("Set Password")
         btn_set.setObjectName("PrimaryButton")
@@ -133,32 +171,19 @@ class LoginPage(BasePage):
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         lbl_pwd = QLabel("Password")
-        self.input_pwd = QLineEdit()
-        self.input_pwd.setPlaceholderText("Enter password")
-        self.input_pwd.setEchoMode(QLineEdit.EchoMode.Password)
+        self.input_pwd = PasswordInput("Enter password")
         
         btn_login = QPushButton("Login")
         btn_login.setObjectName("PrimaryButton")
         btn_login.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_login.clicked.connect(self.handle_login)
         
-        # links_layout = QHBoxLayout()
-        # chk_remember = QLabel("Remember me") 
-        # btn_forgot = QPushButton("Forgot password?")
-        # btn_forgot.setObjectName("LinkButton")
-        # btn_forgot.setCursor(Qt.CursorShape.PointingHandCursor)
-        
-        # links_layout.addWidget(chk_remember)
-        # links_layout.addStretch()
-        # links_layout.addWidget(btn_forgot)
-
         self.card_layout.addWidget(icon_label)
         self.card_layout.addWidget(title)
         self.card_layout.addWidget(subtitle)
         self.card_layout.addSpacing(10)
         self.card_layout.addWidget(lbl_pwd)
         self.card_layout.addWidget(self.input_pwd)
-        # self.card_layout.addLayout(links_layout)
         self.card_layout.addWidget(btn_login)
 
     def handle_login(self):
@@ -166,12 +191,12 @@ class LoginPage(BasePage):
         stored_hash = self.db.get_master_password()
         
         if SystemLogic.check_password(pwd, stored_hash):
-            self.navigator.setCurrentIndex(2) # Pindah ke Dashboard
+            self.navigator.setCurrentIndex(2) 
             self.navigator.currentWidget().refresh_list()
         else:
             QMessageBox.critical(self, "Error", "Invalid Password!")
 
-# --- DASHBOARD & DIALOGS ---
+
 
 class FolderItemWidget(QWidget):
     """Widget custom untuk tampilan baris folder"""
@@ -235,13 +260,9 @@ class LockDialog(QDialog):
         path_layout.addWidget(lbl_full_path)
         layout.addWidget(path_frame)
         
-        self.input_pwd = QLineEdit()
-        self.input_pwd.setPlaceholderText("Create folder password")
-        self.input_pwd.setEchoMode(QLineEdit.EchoMode.Password)
+        self.input_pwd = PasswordInput("Create folder password")
         
-        self.input_confirm = QLineEdit()
-        self.input_confirm.setPlaceholderText("Confirm folder password")
-        self.input_confirm.setEchoMode(QLineEdit.EchoMode.Password)
+        self.input_confirm = PasswordInput("Confirm folder password")
         
         layout.addWidget(QLabel("Password"))
         layout.addWidget(self.input_pwd)
@@ -289,15 +310,12 @@ class UnlockDialog(QDialog):
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(subtitle)
 
-        # Path Display (Sederhana)
         path_lbl = QLabel(f"📁 {os.path.basename(folder_path)}")
         path_lbl.setStyleSheet("background-color: #F3F4F6; padding: 10px; border-radius: 8px; color: #4F46E5; font-weight: bold;")
         path_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(path_lbl)
         
-        self.input_pwd = QLineEdit()
-        self.input_pwd.setPlaceholderText("Enter folder password")
-        self.input_pwd.setEchoMode(QLineEdit.EchoMode.Password)
+        self.input_pwd = PasswordInput("Enter folder password")
         
         layout.addWidget(QLabel("Password"))
         layout.addWidget(self.input_pwd)
@@ -390,17 +408,13 @@ class DashboardPage(QWidget):
         folder_path = current_item.data(Qt.ItemDataRole.UserRole + 1)
         folder_id = current_item.data(Qt.ItemDataRole.UserRole)
         
-        # Munculkan Dialog Halaman 5
         dialog = UnlockDialog(self, folder_path)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             input_pwd = dialog.password
             
-            # 1. Ambil Hash dari DB
             stored_hash = self.db.get_folder_password(folder_id)
             
-            # 2. Validasi Password
             if stored_hash and SystemLogic.check_password(input_pwd, stored_hash):
-                # 3. Proses Unlock System
                 if SystemLogic.unlock_folder(folder_path):
                     self.db.delete_folder(folder_id)
                     self.refresh_list()
